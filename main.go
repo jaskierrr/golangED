@@ -1,45 +1,55 @@
 package main
 
 import (
-	"strconv"
+	"sort"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
 
-var postLikes = map[string]int64{}
+type (
+	BinarySearchRequest struct {
+		Numbers []int `json:"numbers"`
+		Target  int   `json:"target"`
+	}
+
+	BinarySearchResponse struct {
+		TargetIndex int    `json:"target_index"`
+		Error       string `json:"error,omitempty"`
+	}
+)
+
+const targetNotFound = -1
 
 func main() {
-	webApp := fiber.New(fiber.Config{Immutable: true})
+	webApp := fiber.New()
 	webApp.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Go to /likes/12345")
+		return c.SendStatus(200)
 	})
+
 	// BEGIN (write your solution here)
-	webApp.Get("/likes/:id", func(c *fiber.Ctx) error {
-		id := c.Params("id", "")
-		postID, ok := postLikes[id]
+	webApp.Post("/search", func(c *fiber.Ctx) error {
+		requestStuct := BinarySearchRequest{}
+		responseStruct := BinarySearchResponse{}
 
-		if !ok {
-			return c.SendStatus(fiber.StatusNotFound)
+		if err := c.BodyParser(&requestStuct); err != nil {
+			responseStruct.TargetIndex = targetNotFound
+			responseStruct.Error = "Invalid JSON"
+
+			return c.Status(400).JSON(responseStruct)
 		}
 
-		return c.SendString(strconv.FormatInt(postID, 10))
-	})
+		responseStruct.TargetIndex = sort.SearchInts(requestStuct.Numbers, requestStuct.Target)
 
-	webApp.Post("/likes/:id", func(c *fiber.Ctx) error {
-		id := c.Params("id", "")
-		postID, ok := postLikes[id]
+		if responseStruct.TargetIndex == len(requestStuct.Numbers) {
+			responseStruct.TargetIndex = targetNotFound
+			responseStruct.Error = "Target was not found"
 
-		postID++
-		postLikes[id] += 1
-
-		if !ok {
-			return c.Status(fiber.StatusCreated).SendString(strconv.FormatInt(postID, 10))
+			return c.Status(404).JSON(responseStruct)
 		}
 
-		return c.Status(fiber.StatusOK).SendString(strconv.FormatInt(postID, 10))
+		return c.Status(200).JSON(responseStruct)
 	})
-
 	// END
 
 	logrus.Fatal(webApp.Listen(":8080"))
