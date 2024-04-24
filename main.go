@@ -1,54 +1,58 @@
 package main
 
 import (
-	"sort"
+	"net/url"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
 
 type (
-	BinarySearchRequest struct {
-		Numbers []int `json:"numbers"`
-		Target  int   `json:"target"`
+	CreateLinkRequest struct {
+		External string `json:"external"`
+		Internal string `json:"internal"`
 	}
 
-	BinarySearchResponse struct {
-		TargetIndex int    `json:"target_index"`
-		Error       string `json:"error,omitempty"`
+	GetLinkResponse struct {
+		Internal string `json:"internal"`
 	}
 )
 
-const targetNotFound = -1
+var links = make(map[string]string)
 
 func main() {
 	webApp := fiber.New()
 	webApp.Get("/", func(c *fiber.Ctx) error {
 		return c.SendStatus(200)
 	})
-
 	// BEGIN (write your solution here)
-	webApp.Post("/search", func(c *fiber.Ctx) error {
-		requestStuct := BinarySearchRequest{}
-		responseStruct := BinarySearchResponse{}
+	webApp.Post("/links", func(c *fiber.Ctx) error {
+		req := CreateLinkRequest{}
 
-		if err := c.BodyParser(&requestStuct); err != nil {
-			responseStruct.TargetIndex = targetNotFound
-			responseStruct.Error = "Invalid JSON"
-
-			return c.Status(400).JSON(responseStruct)
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).SendString("Invalid JSON")
 		}
 
-		responseStruct.TargetIndex = sort.SearchInts(requestStuct.Numbers, requestStuct.Target)
+		links[req.External] = req.Internal
 
-		if responseStruct.TargetIndex == len(requestStuct.Numbers) {
-			responseStruct.TargetIndex = targetNotFound
-			responseStruct.Error = "Target was not found"
+		return c.SendStatus(200)
+	})
 
-			return c.Status(404).JSON(responseStruct)
+	webApp.Get("/links/:external", func(c *fiber.Ctx) error {
+		req := c.Params("external", "")
+		request, err := url.QueryUnescape(req)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).SendString("Link not found")
 		}
 
-		return c.Status(200).JSON(responseStruct)
+		internal, ok := links[request]
+
+		if !ok {
+			return c.Status(fiber.StatusNotFound).SendString("Link not found")
+		}
+
+		res := GetLinkResponse{Internal: internal}
+		return c.Status(200).JSON(res)
 	})
 	// END
 
