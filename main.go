@@ -1,43 +1,31 @@
 package main
 
 import (
-	"strconv"
+	"strings"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
 
+type User struct {
+	ID      int64
+	Email   string
+	Age     int
+	Country string
+}
+
+var users = map[int64]User{}
+
 type (
-	GetTaskResponse struct {
-		ID       int64  `json:"id"`
-		Desc     string `json:"description"`
-		Deadline int64  `json:"deadline"`
+	CreateUserRequest struct {
+		// BEGIN (write your solution here)
+		ID      int64  `json:"id" validate:"required,min=0"`
+		Email   string `json:"email" validate:"required,email"`
+		Age     int    `json:"age" validate:"required,min=18,max=130"`
+		Country string `json:"country" validate:"required,allowable_text"`
+		// END
 	}
-
-	CreateTaskRequest struct {
-		Desc     string `json:"description"`
-		Deadline int64  `json:"deadline"`
-	}
-
-	CreateTaskResponse struct {
-		ID int64 `json:"id"`
-	}
-
-	UpdateTaskRequest struct {
-		Desc     string `json:"description"`
-		Deadline int64  `json:"deadline"`
-	}
-
-	Task struct {
-		ID       int64
-		Desc     string
-		Deadline int64
-	}
-)
-
-var (
-	taskIDCounter int64 = 1
-	tasks               = make(map[int64]Task)
 )
 
 func main() {
@@ -47,95 +35,46 @@ func main() {
 	})
 
 	// BEGIN (write your solution here) (write your solution here)
-	webApp.Post("/tasks", func(c *fiber.Ctx) error {
-		req := CreateTaskRequest{}
+	validate := validator.New()
+
+	allowableWords := []string{"usa", "germany", "france"}
+
+	vErr := validate.RegisterValidation("allowable_text", func(fl validator.FieldLevel) bool {
+		text := fl.Field().String()
+		for _, word := range allowableWords {
+			if strings.Contains(strings.ToLower(text), word) {
+				return true
+			}
+		}
+		return false
+	})
+
+	if vErr != nil {
+		logrus.Fatal("register validation ", vErr)
+	}
+
+	webApp.Post("/users", func(c *fiber.Ctx) error {
+		req := &CreateUserRequest{}
 		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).SendString("Invalid JSON")
+			return c.Status(400).SendString("body parser")
 		}
 
-		CreatedTask := Task{
-			ID:       taskIDCounter,
-			Desc:     req.Desc,
-			Deadline: req.Deadline,
-		}
-		taskIDCounter += 1
-		tasks[CreatedTask.ID] = CreatedTask
-
-		res := CreateTaskResponse{ID: CreatedTask.ID}
-
-		return c.Status(200).JSON(res)
-	})
-
-	webApp.Patch("/tasks/:id", func(c *fiber.Ctx) error {
-		req := c.Params("id", "")
-		reqBody := GetTaskResponse{}
-		if err := c.BodyParser(&reqBody); err != nil {
-			return c.SendStatus(404)
-		}
-
-		reqID, err := strconv.Atoi(req)
+		err := validate.Struct(req)
 
 		if err != nil {
-			return c.Status(400).SendString("Invalid ID")
+			return c.Status(422).SendString(err.Error())
 		}
 
-		PatchTask, ok := tasks[int64(reqID)]
-
-		if !ok {
-			return c.SendStatus(404)
+		users[req.ID] = User{
+			ID: req.ID,
+			Email: req.Email,
+			Age: req.Age,
+			Country: req.Country,
 		}
-
-		if reqBody.Desc != "" {
-			PatchTask.Desc = reqBody.Desc
-		}
-		if reqBody.Deadline != 0 {
-			PatchTask.Deadline = reqBody.Deadline
-		}
-
-		tasks[int64(reqID)] = PatchTask
 
 
 		return c.SendStatus(200)
 	})
-
-	webApp.Get("/tasks/:id", func(c *fiber.Ctx) error {
-		req := c.Params("id", "")
-		reqID, err := strconv.Atoi(req)
-
-		if err != nil {
-			return c.Status(400).SendString("Invalid ID")
-		}
-
-		GetTask, ok := tasks[int64(reqID)]
-
-		if !ok {
-			return c.SendStatus(404)
-		}
-
-		return c.Status(200).JSON(GetTaskResponse(GetTask))
-	})
-
-	webApp.Delete("/tasks/:id", func(c *fiber.Ctx) error {
-		req := c.Params("id", "")
-		reqID, err := strconv.Atoi(req)
-
-		if err != nil {
-			return c.Status(400).SendString("Invalid ID")
-		}
-
-		_, ok := tasks[int64(reqID)]
-
-		if !ok {
-			return c.SendStatus(404)
-		}
-
-		delete(tasks, int64(reqID))
-
-
-		return c.SendStatus(200)
-	})
-
 	// END
-
 	logrus.Fatal(webApp.Listen(":8080"))
 }
