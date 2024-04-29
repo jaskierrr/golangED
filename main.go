@@ -1,80 +1,49 @@
 package main
 
 import (
-	"strings"
+	"os"
+	"time"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/sirupsen/logrus"
 )
 
-type User struct {
-	ID      int64
-	Email   string
-	Age     int
-	Country string
-}
-
-var users = map[int64]User{}
-
-type (
-	CreateUserRequest struct {
-		// BEGIN (write your solution here)
-		ID      int64  `json:"id" validate:"required,min=0"`
-		Email   string `json:"email" validate:"required,email"`
-		Age     int    `json:"age" validate:"required,min=18,max=130"`
-		Country string `json:"country" validate:"required,allowable_text"`
-		// END
-	}
-)
-
 func main() {
+
+	file, err := os.OpenFile(".log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		logrus.Fatalf("error opening file: %v", err)
+	}
+	defer file.Close()
+
 	webApp := fiber.New()
 	webApp.Get("/", func(c *fiber.Ctx) error {
 		return c.SendStatus(200)
 	})
 
-	// BEGIN (write your solution here) (write your solution here)
-	validate := validator.New()
 
-	allowableWords := []string{"usa", "germany", "france"}
-
-	vErr := validate.RegisterValidation("allowable_text", func(fl validator.FieldLevel) bool {
-		text := fl.Field().String()
-		for _, word := range allowableWords {
-			if strings.Contains(strings.ToLower(text), word) {
-				return true
-			}
-		}
-		return false
+	webApp.Use(requestid.New())
+	webApp.Use(logger.New(logger.Config{
+		Format: "${locals:requestid}: ${method} ${path} - ${status}\n",
+		Output: file,
+	}))
+	webApp.Use(limiter.New(limiter.Config{
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":" + c.Path()
+		},
+		Max:        1,
+		Expiration: 5 * time.Second,
+	}))
+	webApp.Get("/foo", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
 	})
 
-	if vErr != nil {
-		logrus.Fatal("register validation ", vErr)
-	}
-
-	webApp.Post("/users", func(c *fiber.Ctx) error {
-		req := &CreateUserRequest{}
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).SendString("body parser")
-		}
-
-		err := validate.Struct(req)
-
-		if err != nil {
-			return c.Status(422).SendString(err.Error())
-		}
-
-		users[req.ID] = User{
-			ID: req.ID,
-			Email: req.Email,
-			Age: req.Age,
-			Country: req.Country,
-		}
-
-
-		return c.SendStatus(200)
+	webApp.Get("/bar", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
 	})
-	// END
+
 	logrus.Fatal(webApp.Listen(":8080"))
 }
