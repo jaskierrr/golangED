@@ -1,49 +1,136 @@
 package main
 
 import (
-	"os"
 	"time"
 
+	jwtware "github.com/gofiber/contrib/jwt"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/requestid"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
 )
 
-func main() {
-
-	file, err := os.OpenFile(".log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		logrus.Fatalf("error opening file: %v", err)
+type (
+	SignUpRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
-	defer file.Close()
 
+	SignInRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	SignInResponse struct {
+		JWTToken string `json:"jwt_token"`
+	}
+
+	ProfileResponse struct {
+		Email string `json:"email"`
+	}
+
+	User struct {
+		Email    string
+		password string
+	}
+)
+
+var (
+	webApiPort = ":8080"
+
+	users = map[string]User{}
+
+	secretKey = []byte("qwerty123456")
+
+	contextKeyUser = "user"
+)
+
+func main() {
 	webApp := fiber.New()
 	webApp.Get("/", func(c *fiber.Ctx) error {
 		return c.SendStatus(200)
 	})
 
+	// BEGIN (write your solution here) (write your solution here)
+	webApp.Post("/signup", func(c *fiber.Ctx) error {
+		reqStruct := SignUpRequest{}
+		if err := c.BodyParser(&reqStruct); err != nil {
+			return c.Status(400).SendString("Invalid JSON")
+		}
 
-	webApp.Use(requestid.New())
-	webApp.Use(logger.New(logger.Config{
-		Format: "${locals:requestid}: ${method} ${path} - ${status}\n",
-		Output: file,
-	}))
-	webApp.Use(limiter.New(limiter.Config{
-		KeyGenerator: func(c *fiber.Ctx) string {
-			return c.IP() + ":" + c.Path()
+		 if _, exist := users[reqStruct.Email]; exist {
+			return c.Status(409).SendString("User already exists")
+		}
+
+		users[reqStruct.Email] = User{
+			Email:    reqStruct.Email,
+			password: reqStruct.Password,
+		}
+
+		return c.SendStatus(200)
+	})
+
+	webApp.Post("/signin", func(c *fiber.Ctx) error {
+		reqStruct := SignInRequest{}
+		if err := c.BodyParser(&reqStruct); err != nil {
+			return c.Status(400).SendString("Invalid JSON")
+		}
+
+		user, exist := users[reqStruct.Email]
+
+		if !exist {
+			return c.Status(422).SendString("User does not exist")
+		}
+
+		if reqStruct.Password != user.password {
+			return c.SendStatus(422)
+		}
+
+		payload := jwt.MapClaims{
+			"sub": user.Email,
+			"exp": time.Now().Add(time.Hour * 72).Unix(),
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, payload)
+
+		t, err := token.SignedString(secretKey)
+
+		if err != nil {
+			return c.SendStatus(500)
+		}
+
+		return c.Status(200).JSON(SignInResponse{JWTToken: t})
+	})
+
+	authorizedGroup := webApp.Group("")
+	authorizedGroup.Use(jwtware.New(jwtware.Config{
+		SigningKey: jwtware.SigningKey{
+			Key: secretKey,
 		},
-		Max:        1,
-		Expiration: 5 * time.Second,
+		ContextKey: contextKeyUser,
 	}))
-	webApp.Get("/foo", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusOK)
-	})
 
-	webApp.Get("/bar", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusOK)
-	})
+	authorizedGroup.Get("/profile", func(c *fiber.Ctx) error {
+		jwtToken, ok := c.Context().Value(contextKeyUser).(*jwt.Token)
 
-	logrus.Fatal(webApp.Listen(":8080"))
+		if !ok {
+			return c.SendStatus(401)
+		}
+
+		payload, ok := jwtToken.Claims.(jwt.MapClaims)
+
+		if !ok {
+			return c.SendStatus(401)
+		}
+
+		userInfo, ok := users[payload["sub"].(string)]
+
+		if !ok {
+			return c.SendStatus(422)
+		}
+
+		return c.Status(200).JSON(ProfileResponse{Email: userInfo.Email})
+	})
+	// END
+
+	logrus.Fatal(webApp.Listen(webApiPort))
 }
