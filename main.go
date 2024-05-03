@@ -1,53 +1,56 @@
 package main
 
 import (
-	"github.com/gofiber/template/html/v2"
+	"time"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/sirupsen/logrus"
 )
 
 type (
-	CreateItemRequest struct {
-		Name  string `json:"name"`
-		Price uint   `json:"price"`
+	SendPushNotificationRequest struct {
+		Message string `json:"message"`
+		UserID  int64  `json:"user_id"`
 	}
 
-	Item struct {
-		Name  string `json:"name"`
-		Price uint   `json:"price"`
+	PushNotification struct {
+		Message string `json:"message"`
+		UserID  int64  `json:"user_id"`
 	}
 )
 
-var (
-	items []Item
-)
+var pushNotificationsQueue []PushNotification
 
 func main() {
-	viewsEngine := html.New("./templates", ".tmpl")
+	// BEGIN (write your solution here)
 	webApp := fiber.New(fiber.Config{
-		Views: viewsEngine,
+		ReadTimeout: 3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 	})
+
+	webApp.Use(recover.New())
+
+	// END
 	webApp.Get("/", func(c *fiber.Ctx) error {
 		return c.SendStatus(200)
 	})
-	// BEGIN (write your solution here)
 
-	webApp.Post("/items", func(c *fiber.Ctx) error {
-		req := CreateItemRequest{}
+	webApp.Post("/push/send", func(c *fiber.Ctx) error {
+		var req SendPushNotificationRequest
 		if err := c.BodyParser(&req); err != nil {
-			return c.SendStatus(400)
+			// BEGIN (write your solution here)
+			return c.Status(400).SendString("Invalid JSON")
+			// END
 		}
 
-		items = append(items, Item(req))
+		pushNotificationsQueue = append(pushNotificationsQueue, PushNotification(req))
+		if len(pushNotificationsQueue) > 3 {
+			panic("Queue is full")
+		}
 
-		return c.SendStatus(200)
+		return c.SendStatus(fiber.StatusOK)
 	})
-
-	webApp.Get("/items/view", func(c *fiber.Ctx) error {
-		return c.Render("item", items)
-	})
-
-	// END
 
 	logrus.Fatal(webApp.Listen(":8080"))
 }
